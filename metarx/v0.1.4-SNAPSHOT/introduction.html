@@ -1,0 +1,63 @@
+<!DOCTYPE html><html lang="en-GB">
+        <head>
+          <title>MetaRx User Manual v0.1.4-SNAPSHOT - Introduction</title>
+          <meta charset="utf-8"/>
+          <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+          <meta name="generator" content="MetaDocs v0.1.1-SNAPSHOT"/>
+          <link rel="shortcut icon" href="favicon.ico"/>
+          
+          <link rel="stylesheet" type="text/css" href="css/kult.css"/><link rel="stylesheet" type="text/css" href="css/default.min.css"/>
+        </head>
+
+        <body>
+          <div id="wrapper">
+      <header>
+            <h1 class="title">MetaRx User Manual v0.1.4-SNAPSHOT</h1>
+          </header><nav><a href="index.html">Table of contents</a> | <span>Next chapter: <a href="implementation.html">Implementation</a></span> | <span><a href="https://github.com/MetaStack-pl/MetaRx/edit/master/manual/chapters/introduction.md">Edit source</a></span></nav><h1 id="introduction">Introduction</h1><h2 id="installation">Installation</h2><p>Add the following dependencies to your build configuration:</p><pre class="sourceCode scala"><code data-lang="scala">libraryDependencies += &quot;pl.metastack&quot; %%  &quot;metarx&quot; % &quot;0.1.4-SNAPSHOT&quot;  // Scala
+libraryDependencies += &quot;pl.metastack&quot; %%% &quot;metarx&quot; % &quot;0.1.4-SNAPSHOT&quot;  // Scala.js</code></pre><h2 id="concepts">Concepts</h2><p>Reactive programming is a paradigm that focuses on:</p><ul><li>propagation of data, specifically changes, and</li><li>data flow.</li></ul><p>Concretely, a data structure is said to be <i>reactive</i> (or <i>streaming</i>) if it models its state as streams. It does this by defining change objects (*deltas*) and mapping its operations onto these. The published stream is read-only and can be subscribed. If the stream does not have any subscribers, the state would not get persisted and is lost.</p><blockquote><p><b>Example:</b> A reactive list implementation could map all its operations like <code>clear()</code> or <code>insertAfter()</code> on the two delta types <code>Insert</code> and <code>Delete</code>. A subscriber can interpret the deltas and persist the computed list in an in-memory buffer.</p></blockquote><p>Another property of a reactive data structure is that it does not only stream deltas, but also state observations. Sticking to the reactive list example, the deltas could allow streaming observations on the list’s inherent properties — one being the length, another the existence of a certain element, i.e. <code>contains(value)</code>.</p><p>Finally, a <i>mutable</i> reactive data structure is an extension with the sole difference that it maintains an internal state which always represents the computed result after a delta was received. This is a hybrid solution bridging mutable object-oriented objects with reactive data structures. The mutable variant of our reactive list could send its current state when a subscriber is registering. This ultimately leads to better legibility of code as subscribers can register at any point without caring whether the expected data has been propagated already. The second reason is that otherwise we would need multiple instances of mutual objects that interpret the deltas. This is often undesired as having multiple such instances incurs a memory overhead.</p><p>To recap, a reactive data structure has four layers:</p><ul><li><b>State:</b> interpretation of the delta stream and &quot;converting&quot; it into a mutable object</li><li><b>Mutation operations:</b> functions to produce deltas on the stream<a href="#fn1" class="footnote" id="fnref1">[1]</a></li><li><b>Polling operations:</b> blocking functions to query the state</li><li><b>Streaming operations:</b> publish the state changes as a stream</li></ul><p>Obviously, the first three layers are the very foundation of object-orientation. It is different in that a) modifications are encoded as deltas and b) there are streaming operations.</p><p>For now we just covered the first component of reactive programming: data propagation. The second cornerstone, data flow, is equally important, though. Streams describe data flow in terms of dependencies. Considering you want to plot a line as a graph using the formula $y = mx+b$ and the user provides the values for $m$ and $b$, then you would wrap these inputs in channels and express the dependencies using combinators<a href="#fn2" class="footnote" id="fnref2">[2]</a>:</p><pre class="sourceCode scala"><code data-lang="scala">val m = Opt[Int]()
+val b = Opt[Int]()
+
+// Produces when user provided `m` and `b`
+val mAndB: ReadChannel[(Int, Int)] = m.zip(b)
+
+// Function channel to calculate `y` for current input
+val y: ReadChannel[Int =&gt; Int] =
+  mAndB.map { case (m, b) =&gt;
+    (x: Int) =&gt; m * x + b
+  }</code></pre><p>The user could listen to <code>y</code> and whenever it receives a new function, it can just call it for all the <code>x</code> in the interval of the shown graph. The example shows that messages in streams are not bound to data objects and even immutable functions could be passed around.</p><p>The data propagation is illustrated by the following diagram:</p><p><img src="images/data-flow.png"/></p><p>As soon as the user inserts a value for <code>m</code> as well as <code>b</code>, <code>mAndB</code> will produce a tuple. Then, <code>y</code> computes the final function.</p><p>How channels work in detail is explained in the following sections. This example should only give an intuition of the fundamental concepts and how data dependencies are expressed.</p><h2 id="requirements">Requirements</h2><p>The term &quot;stream&quot; was used several times. This term is polysemous and requires further explanation. In reactive programming there are different types of streams with severe semantic differences.</p><blockquote><p><a href="https://rx.codeplex.com/">Rx</a> (Reactive Extensions) is a contract designed by Microsoft which calls these streams <i>observables</i> and defines rules how to properly interact with these. An observable can be subscribed to with an <i>observer</i> which has one function for the next element and two auxiliary ones for handling errors and the completion of the stream.
+Furthermore, observables are subdivided into <i>cold</i> and <i>hot</i> observables<a href="#fn3" class="footnote" id="fnref3">[3]</a>:</p><ul><li><b>Cold observable:</b> Streams that are passive and start publishing on request</li><li><b>Hot observable:</b> Streams that are active and publish regardless of subscriptions</li></ul><p>There are extensions to Rx which introduce back-pressure<a href="#fn4" class="footnote" id="fnref4">[4]</a> to deal with streams that are producing values too fast. This may not be confused with back-propagation which describes those streams where the subscribers could propagate values back to the producer.</p></blockquote><p>This illustrates the diversity of streams. Due to the nature of MetaRx, streams had to be implemented differently from the outlined ones. Some of the requirements were:</p><ul><li>lightweight design</li><li>support for n-way binding</li><li>usable as the basis for reactive data structures</li><li>provide functionality for resource management</li><li>require little boilerplate to define new operations</li></ul><p>To better differentiate from the established reactive frameworks, a less biased term than <i>observable</i> was called for and the reactive streams are therefore called <i>channels</i> in MetaRx. The requirements have been implemented as follows: A subscriber is just a function pointer (wrapped around a small object). A channel can have an unlimited number of children whereas each of the child channels knows their parent. A function for flushing the content of a channel upon subscription can be freely defined during instantiation<a href="#fn5" class="footnote" id="fnref5">[5]</a>. When a channel is destroyed, so are its children. Error handling is not part of the implementation. Similarly, no back-pressure is performed, but back-propagation is implemented for some selected operations like <code>biMap()</code>.</p><p>For client-side web development only a small percentage of the interaction with streams require the features observables provide and this does not justify a more complex overall design. It is possible to use a full-fledged model like Rx or Monifu for just those areas of the application where necessary by redirecting (piping) the channel output.</p><div class="footnotes">
+            <hr/>
+            <ol><li id="fn1">
+              <p>
+                These functions do not access the state in any way.
+                <a href="#fnref1" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn2">
+              <p>
+                The types in the code only serve illustration purposes
+                <a href="#fnref2" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn3">
+              <p>
+                Source: [leecampbell.blogspot.de](http://leecampbell.blogspot.de/2010/08/rx-part-7-hot-and-cold-observables.html) (4th February 2015)
+                <a href="#fnref3" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn4">
+              <p>
+                For instance, [Monifu](https://github.com/monifu/monifu) implements this feature.
+                <a href="#fnref4" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn5">
+              <p>
+                This function is called by ``attach()`` and produces multiple values which is necessary for some reactive data structures like lists.
+                <a href="#fnref5" class="reversefootnote"> ↩</a>
+              </p>
+            </li></ol>
+          </div>
+      <p><small>Generated with <a href="http://github.com/MetaStack-pl/MetaDocs">MetaDocs v0.1.1-SNAPSHOT</a></small></p>
+    </div>
+          <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script><script src="js/main.js"></script><script src="js/highlight.pack.js"></script>
+          <script>hljs.initHighlightingOnLoad();</script>
+        </body>
+      </html>

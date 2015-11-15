@@ -1,0 +1,135 @@
+<!DOCTYPE html><html lang="en-GB">
+        <head>
+          <title>MetaRx User Manual v0.1.4-SNAPSHOT - Reactive data structures</title>
+          <meta charset="utf-8"/>
+          <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+          <meta name="generator" content="MetaDocs v0.1.1-SNAPSHOT"/>
+          <link rel="shortcut icon" href="favicon.ico"/>
+          
+          <link rel="stylesheet" type="text/css" href="css/kult.css"/><link rel="stylesheet" type="text/css" href="css/default.min.css"/>
+        </head>
+
+        <body>
+          <div id="wrapper">
+      <header>
+            <h1 class="title">MetaRx User Manual v0.1.4-SNAPSHOT</h1>
+          </header><nav><span>Previous chapter: <a href="implementation.html">Implementation</a></span> | <span>Next chapter: <a href="development.html">Development</a></span> | <span><a href="https://github.com/MetaStack-pl/MetaRx/edit/master/manual/chapters/data-structures.md">Edit source</a></span></nav><h1 id="reactive-data-structures">Reactive data structures</h1><p>MetaRx currently implements four reactive data structures:</p><ul><li><b>Channels:</b> single values like <code>T</code></li><li><b>Buffers:</b> lists like <code>Seq[T]</code></li><li><b>Dictionaries:</b> maps like <code>Map[A, B]</code></li><li><b>Sets:</b> reactive <code>Set[T]</code></li></ul><h2 id="channels">Channels</h2><p>A channel models continuous values as a stream. It serves as a multiplexer for typed messages that consist of immutable values. Messages sent to the channel get propagated to the observers that have been attached to the channel — in the same order as they were added. It is possible to operate on channels with higher-order functions such as <code>map()</code>, <code>filter()</code> or <code>take()</code>. These methods may be chained, such that every produced values is propagated down the observer chain.</p><p>MetaRx differentiates between two top-level channel types:</p><ul><li><b>Channel:</b> corresponds to a reactive <code>T</code></li><li><b>Partial channel:</b> corresponds to a reactive <code>Option[T]</code></li></ul><p>There are four channel implementations:</p><ul><li><code>Channel</code>: stream that does not persist its values</li><li><code>Var</code>: variable stream; its value is always defined and has an initial value<a href="#fn9" class="footnote" id="fnref9">[9]</a></li><li><code>LazyVar</code>: stream for lazily evaluated variables</li><li><code>PtrVar</code>: stream for generic events<a href="#fn10" class="footnote" id="fnref10">[10]</a></li></ul><p>Partial channels model optional values:</p><ul><li><code>PartialChannel</code>: base type</li><li><code>Opt</code>: stream that has two states, either <i>defined with a value</i> or <i>undefined</i></li></ul><blockquote><p><b>Note:</b> <code>Opt[T]</code> is merely a convenience type and <code>Var[Option[T]]</code> could be used, too.</p></blockquote><h3 id="operations">Operations</h3><p>Here is a simple example for a channel that receives integers. We register an observer which prints all values on the console:</p><p><pre class="sourceCode scala"><code data-lang="scala">val result = ArrayBuffer.empty[Int]
+
+val ch = Channel[Int]() // initialise
+ch.attach(result += _)  // attach observer
+ch := 42                // produce value
+
+result</code></pre><b>Output:</b><pre class="sourceCode"><code>ArrayBuffer(42)</code></pre></p><blockquote><p><b>Note:</b> The <code>:=</code> operator is a shortcut for the method <code>produce</code>.</p></blockquote><p>The return values of operations are channels, therefore chaining is possible. Channels can be used to express data dependencies:</p><pre class="sourceCode scala"><code data-lang="scala">val ch = Channel[Int]()
+ch.filter(_ &gt; 3)
+  .map(_ + 1)
+  .attach(println)
+ch := 42  // 43 printed
+ch := 1   // nothing printed</code></pre><p>Use the method <code>distinct</code> to produce a value if it is the first or different from the previous one. A use case is to perform time-consuming operations such as performing HTTP requests only once for the same user input:</p><pre class="sourceCode scala"><code data-lang="scala">ch.distinct.attach { query =&gt;
+  // perform HTTP request
+}</code></pre><p>Considering that you want to observe multiple channels of the same type and merge the produced values, you can use the <code>|</code> operator<a href="#fn11" class="footnote" id="fnref11">[11]</a>:</p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[String]()
+val b = Channel[String]()
+val c = Channel[String]()
+
+val merged: ReadChannel[String] = a | b | c</code></pre><p>It must be noted that streaming operations have different semantics than their non-reactive counterparts. For brevity, only certain combinators are covered by the manual. For the rest, please refer to the ScalaDoc documentation.</p><p>For Boolean channels, the logical operators are defined, and give a new channel with the result:</p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[Boolean]()
+val b = Channel[Boolean]()
+
+val aAndB: ReadChannel[Boolean] = a &amp;&amp; b // same as a.zip(b).map { case (aVal, bVal) =&gt; aVal &amp;&amp; bVal }
+val aOrB: ReadChannel[Boolean] = a || b
+val notA = !a // or a.isFalse()</code></pre><p>Furthermore <code>onTrue()</code> and <code>onFalse()</code> are defined and will give a <code>ReadChannel[Unit]</code> that trigger when either true or false value is received.</p><p>Aritmetic operators like <code>+, -, *, /, %, &lt;, &lt;=, &gt;, &gt;=, ===, !==</code> are also supported for types that define them (supported by Numeric/Ordering traits):</p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[Int]()
+val b = Channel[Int]()
+
+val c: ReadChannel[Int] = 5 - 2 * a + 3 / b
+val d: ReadChannel[Boolean] = c &gt;= 42</code></pre><h3 id="state-channels">State channels</h3><p>For better performance, <code>Channel</code> does not cache the produced values. Some operations cannot be implemented without access to the current value, though. And often it is necessary to poll the current value. For these reasons <i>state channels</i> such as <code>Var</code> or <code>Opt</code> were introduced. The following example visualises the different behaviours:</p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(42)
+ch.attach(println)  // prints 42
+
+val ch2 = Channel[Int]()
+ch2 := 42  // Value is lost as ch2 does not have any observers
+ch2.attach(println)</code></pre><p><code>update()</code> is an operation that requires that the produced values are persisted. <code>update()</code> takes a function which modifies the current value:</p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(2)
+ch.attach(println)
+ch.update(_ + 1)  // produces 3</code></pre><p>A partially-defined channel (<code>Opt</code>) is constructed as follows:</p><pre class="sourceCode scala"><code data-lang="scala">val x = Opt[Int]()
+x := 42</code></pre><p>Alternatively, a default value may be passed:</p><pre class="sourceCode scala"><code data-lang="scala">val x = Opt(42)</code></pre><p>A state channel provides all the methods a channel does. <code>Var[T]</code> and <code>Opt[T]</code> can be obtained from any existing <code>ReadChannel[T]</code> using the method <code>cache</code>:</p><pre class="sourceCode scala"><code data-lang="scala">val chOpt = ch.cache      // Opt[Int]
+val chVar = ch.cache(42)  // Var[Int]</code></pre><p><code>chOpt</code> is undefined as long as no value was produced on <code>ch</code>. <code>chVar</code> will be initialised with 42 and the value is overridden with the first produced value on <code>ch</code>.</p><p><code>biMap()</code> allows to implement a bi-directional map, i.e. a stream with back-propagation:</p><pre class="sourceCode scala"><code data-lang="scala">val map   = Map(1 -&gt; &quot;one&quot;, 2 -&gt; &quot;two&quot;, 3 -&gt; &quot;three&quot;)
+val id    = Var(2)
+val idMap = id.biMap(
+  (id: Int)     =&gt; map(id)
+, (str: String) =&gt; map.find(_._2 == str).get._1)
+id   .attach(x =&gt; println(&quot;id   : &quot; + x))
+idMap.attach(x =&gt; println(&quot;idMap: &quot; + x))
+idMap := &quot;three&quot;</code></pre><p>The output is:</p><pre class="sourceCode shell"><code>id   : 2
+idMap: two
+id   : 3
+idMap: three</code></pre><p><code>biMap()</code> can be used to implement a lens as a channel. The following example defines a lens for the field <code>b</code>. It has a back channel that composes a new object with the changed field value.</p><pre class="sourceCode scala"><code data-lang="scala">case class Test(a: Int, b: Int)
+val test = Var(Test(1, 2))
+val lens = test.biMap(_.b, (x: Int) =&gt; test.get.copy(b = x))
+test.attach(println)
+lens := 42  // produces Test(1, 42)</code></pre><p>A <code>LazyVar</code> evaluates its argument lazily. In the following example, it points to a mutable variable:</p><pre class="sourceCode scala"><code data-lang="scala">var counter = 0
+val ch = LazyVar(counter)
+ch.attach(value =&gt; { counter += 1; println(value) })  // prints 0
+ch.attach(value =&gt; { counter += 1; println(value) })  // prints 1</code></pre><h3 id="call-semantics">Call semantics</h3><p>Functions passed to higher-order operations are evaluated on-demand:</p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(42).map(i =&gt; { println(i); i + 1 })
+ch.attach(_ =&gt; ())  // prints 42
+ch.attach(_ =&gt; ())  // prints 42</code></pre><p>The value of a state channel gets propagated to a child when it requests the value (<code>flush()</code>). In the example, <code>Var</code> delays the propagation of the initial value 42 until the first <code>attach()</code> call. <code>attach()</code> goes up the channel chain and triggers the flush on each channel. In other words, <code>map(f)</code> merely registers an observer, but doesn’t call <code>f</code> right away. <code>f</code> is called each time when any of its direct or indirect children uses <code>attach()</code>.</p><p>This reduces the memory usage and complexity of the channel implementation as no caching needs to be performed. On the other hand, you may want to perform on-site caching of the results of <code>f</code>, especially if the function is side-effecting.</p><p>The current value of a state channel may be read at any time using <code>.get</code> (if available) or <code>flush()</code>.</p><p>There are operations that maintain state for all observers. For example, <code>skip(n)</code> counts the number of produced values<a href="#fn12" class="footnote" id="fnref12">[12]</a>. As soon as <code>n</code> is exceeded, all subsequent values are passed on. The initial <code>attach()</code> calls ignore the first value (42), but deal with all values after that:</p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(42)
+val dch = ch.drop(1)
+dch.attach(println)
+dch.attach(println)
+ch := 23  // produces 23 twice</code></pre><h3 id="cycles">Cycles</h3><p>Certain propagation flows may lead to cycles:</p><pre class="sourceCode scala"><code data-lang="scala">val todo = Channel[String]()
+todo.attach { t =&gt;
+    println(t)
+    todo := &quot;&quot;
+}
+todo := &quot;42&quot;</code></pre><p>Setting <code>todo</code> will result in an infinite loop. Such flows are detected and will lead to a run-time exception. Otherwise, the application would block indefinitely which makes debugging more difficult.</p><p>If a cycle as in the above example is expected, use the combinator <code>filterCycles</code> to make it explicit. This will ignore value propagations caused by a cycle.</p><h2 id="buffers">Buffers</h2><p>Buffers are reactive lists. State changes such as row additions, updates or removals are encoded as delta objects. This allows to reflect these changes directly in the DOM, without having to re-render the entire list. <code>Buffer[T]</code> is therefore more efficient than <code>Channel[Seq[T]]</code> when dealing with list changes.</p><p>The following example creates a buffer with three initial rows, observes the size<a href="#fn13" class="footnote" id="fnref13">[13]</a> and then adds another row:</p><pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 3)
+buf.size.attach(println) // Prints 3
+buf += 4  // Inserts row 4, prints 4</code></pre><p>All polling methods have a dollar sign as suffix <code>$</code>:</p><pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 3)
+println(buf.size$) // Prints 3</code></pre><p>An example of using <code>removeAll()</code>:</p><pre class="sourceCode scala"><code data-lang="scala">val buf  = Buffer(3, 4, 5)
+val mod2 = buf.filter$(_ % 2 == 0)
+
+buf.removeAll(mod2.get)</code></pre><blockquote><p><b>Note:</b> <code>Buffer</code> will identify rows by their value if the row type is a <code>case class</code>. In this case, operations like <code>insertAfter()</code> or <code>remove()</code> will always refer to the first occurrence. This is often not desired. An alternative would be to define a <code>class</code> instead or to wrap the values in a <code>Ref[]</code> object.</p></blockquote><pre class="sourceCode scala"><code data-lang="scala">val todos = Buffer[Ref[Todo]]()
+todos.map { case tr @ Ref(t) =&gt;
+  ...
+}</code></pre><blockquote><p>The value of a <code>Ref[]</code> can be obtained by calling <code>get</code>. However, it is more convenient to do pattern matching as in the example.</p></blockquote><p>You can observe the delta objects produced by a buffer:</p><pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 3)
+buf.changes.attach(println)
+buf += 4
+buf.clear()</code></pre><p>This prints:</p><pre class="sourceCode shell"><code>Insert(Last(),1)
+Insert(Last(),2)
+Insert(Last(),3)
+Insert(Last(),4)
+Clear()</code></pre><p>All streaming operations that a buffer provides are implemented in terms of the <code>changes</code> channel.</p><h2 id="dictionaries">Dictionaries</h2><p>Dictionaries are unordered maps from <code>A</code> to <code>B</code>. MetaRx abbreviates the type as <code>Dict</code>.</p><h2 id="sets">Sets</h2><p>Reactive sets are implemented as <code>BufSet</code><a href="#fn14" class="footnote" id="fnref14">[14]</a>.</p><div class="footnotes">
+            <hr/>
+            <ol><li id="fn9">
+              <p>
+                In Rx terms, ``Var`` would correspond to a *cold observer* as attaching to it will flush its current value. This is different from ``Channel`` which loses its messages when there are no subscribers.
+                <a href="#fnref9" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn10">
+              <p>
+                It can be used to create delta channels from DOM variables by binding to the corresponding events that triggered by the value changes. For an example see ``Node.click``.
+                <a href="#fnref10" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn11">
+              <p>
+                It is an alias for the method ``merge()``
+                <a href="#fnref11" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn12">
+              <p>
+                ``n`` must be greater than 0.
+                <a href="#fnref12" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn13">
+              <p>
+                ``size`` returns a ``ReadChannel[Int]``.
+                <a href="#fnref13" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn14">
+              <p>
+                This name was chosen as ``Set`` would have collided with Scala's implementation.
+                <a href="#fnref14" class="reversefootnote"> ↩</a>
+              </p>
+            </li></ol>
+          </div>
+      <p><small>Generated with <a href="http://github.com/MetaStack-pl/MetaDocs">MetaDocs v0.1.1-SNAPSHOT</a></small></p>
+    </div>
+          <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script><script src="js/main.js"></script><script src="js/highlight.pack.js"></script>
+          <script>hljs.initHighlightingOnLoad();</script>
+        </body>
+      </html>
