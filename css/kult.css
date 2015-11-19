@@ -178,12 +178,6 @@ b, strong {
 
 blockquote {
     color: #423F37;
-    font-size: 1.25em;
-    font-weight: 700;
-	margin: 1em 40px;
-}
-
-blockquote {
     margin-bottom: 2em;
     margin-top: 2em;
 }
