@@ -300,3 +300,7 @@ caption{display:table-caption;font-weight:300;font-size:1.3em;text-transform:upp
     font-size: 0.8rem;
 }
 
+span.code {
+    font-family: Menlo, Monaco, Courier;
+    font-size: 14px;
+}
