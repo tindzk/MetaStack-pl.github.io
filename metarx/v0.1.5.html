@@ -1,0 +1,323 @@
+<!DOCTYPE html><html lang="en-GB">
+        <head>
+          <title>MetaRx User Manual v0.1.5</title>
+          <meta charset="utf-8"/>
+          <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+          <meta name="generator" content="MetaDocs v0.1.1"/>
+          <link rel="shortcut icon" href="favicon.ico"/>
+          
+          <link rel="stylesheet" type="text/css" href="css/kult.css"/><link rel="stylesheet" type="text/css" href="css/default.min.css"/>
+        </head>
+
+        <body>
+          <div id="wrapper">
+      <header>
+          <h3 class="date">January 2016</h3>
+          <h1 class="title">MetaRx User Manual v0.1.5</h1>
+          <h2 class="author">Tim Nieradzik</h2>
+          <p class="affiliation"><em>MetaStack Sp. z o.o.</em></p>
+        </header><nav id="toc"><ul><li><a href="#introduction">Introduction</a><ul><li><a href="#installation">Installation</a></li></ul><ul><li><a href="#example">Example</a></li></ul><ul><li><a href="#features">Features</a></li></ul><ul><li><a href="#comparison">Comparison</a></li></ul></li><li><a href="#reactive-programming">Reactive programming</a><ul><li><a href="#data-propagation">Data propagation</a></li></ul><ul><li><a href="#data-flows">Data flows</a></li></ul><ul><li><a href="#streams">Streams</a></li></ul><ul><li><a href="#summary">Summary</a></li></ul></li><li><a href="#implementation-1">Implementation</a><ul><li><a href="#design-considerations">Design considerations</a></li></ul><ul><li><a href="#summary-1">Summary</a></li></ul></li><li><a href="#reactive-data-structures">Reactive data structures</a><ul><li><a href="#channels">Channels</a></li></ul><ul><li><a href="#buffers">Buffers</a></li></ul><ul><li><a href="#dictionaries">Dictionaries</a></li></ul><ul><li><a href="#sets">Sets</a></li></ul></li><li><a href="#development">Development</a><ul><li><a href="#tests">Tests</a></li></ul><ul><li><a href="#manual">Manual</a></li></ul></li><li><a href="#support">Support</a><ul><li><a href="#bugsfeature-requests">Bugs/feature requests</a></li></ul><ul><li><a href="#discussions">Discussions</a></li></ul></li></ul></nav><p><small><strong>Abstract: </strong><em>Reactive data structures for Scala and Scala.js</em></small></p><p></p><h1 id="introduction">Introduction</h1><p>MetaRx provides reactive data structures for Scala and Scala.js. It is particularly useful in conjunction with user interfaces.</p><h2 id="installation">Installation</h2><p>Add the following dependencies to your build configuration:</p><pre class="sourceCode scala"><code data-lang="scala">libraryDependencies += &quot;pl.metastack&quot; %%  &quot;metarx&quot; % &quot;0.1.5&quot;  // Scala
+libraryDependencies += &quot;pl.metastack&quot; %%% &quot;metarx&quot; % &quot;0.1.5&quot;  // Scala.js</code></pre><h2 id="example">Example</h2><p>The following example illustrates how you can model data flows in MetaRx.</p><p>In the first line, we define a <i>channel</i> that takes integer values. We derive from it another channel that increments every value by 1. The <span class="code">===</span> operator in line 3 yields a channel that produces <span class="code">true</span> if the current value is 1, otherwise <span class="code">false</span>.</p><p><span class="code">attach()</span> attaches a callback that is executed for every produced value.</p><p><pre class="sourceCode scala"><code data-lang="scala">import pl.metastack.metarx._
+
+val ch      = Channel[Int]()
+val plusOne = ch.map(_ + 1)
+val isOne   = plusOne === 1
+
+isOne.attach(println)
+
+ch := 1</code></pre><b>Output:</b><pre class="sourceCode"><code>false</code></pre></p><h2 id="features">Features</h2><ul><li>Reactive data structures:<ul><li>Channels</li><li>Buffers</li><li>Dictionaries</li><li>Sets</li></ul></li><li>Scala.js support</li><li>Thread-safe</li></ul><h2 id="comparison">Comparison</h2><p>MetaRx was developed with simplicity in mind. By design, it doesn’t support back-pressure. It can be used in conjunction with other frameworks such as <a href="http://doc.akka.io/docs/akka-stream-and-http-experimental/current/scala.html">Akka Streams</a>.</p><p></p><h1 id="reactive-programming">Reactive programming</h1><p>Reactive programming is a paradigm that is concerned with:</p><ul><li>propagating data, specifically changes, and</li><li>specifying data flows.</li></ul><h2 id="data-propagation">Data propagation</h2><p>Concretely, a data structure is said to be <i>reactive</i> (or <i>streaming</i>) if it models its state as a stream. It does this by defining change objects (also called <i>deltas</i>) and mapping its operations onto these. The published stream is read-only and can be subscribed. If the stream does not have any subscribers, the state does not get persisted and is lost.</p><p><b>Example:</b> A reactive list implementation could map all of its operations like <span class="code">append()</span>, <span class="code">insertAfter()</span>, <span class="code">delete()</span> and <span class="code">clear()</span> on only two delta types, namely <span class="code">Insert</span> and <span class="code">Delete</span>. A subscriber can interpret the delta objects and persist the computed list in an in-memory buffer.</p><p>A reactive data structure can also stream state observations. Sticking to the reactive list example, we could stream observations based on the list’s inherent properties — one being its current length, another the existence of a certain element, i.e. <span class="code">contains(value)</span>.</p><p>Finally, a <i>mutable</i> reactive data structure is an extension with the sole difference that it maintains an internal state which always represents the computed result after a delta was received. This is a hybrid solution bridging mutable object-oriented objects with reactive data structures.</p><p>The mutable variant of our reactive list could send its current state when a subscriber is registering. Subscribers can register at any point without caring whether the expected data has been propagated yet already. The second motivation for a mutable reactive data structure is that they reduce the overall memory usage; otherwise we would need multiple instances of mutable objects that interpret the deltas.</p><h2 id="data-flows">Data flows</h2><p>For now we have just covered the first component of reactive programming: data propagation. The second cornerstone, data flow, is equally important though. Streams describe data flow in terms of dependencies. Considering you want to plot a line as a graph using the formula <span class="code">y = mx + b</span> while the user provides the values for <span class="code">m</span> and <span class="code">b</span>, then you would wrap these inputs in channels and express the dependencies using combinators<a href="#fn1" class="footnote" id="fnref1">[1]</a>:</p><p><pre class="sourceCode scala"><code data-lang="scala">val m: Var[Int] = Var(5)
+val b: Var[Int] = Var(10)
+
+// Produces when user provided `m` and `b`
+val mAndB: ReadChannel[(Int, Int)] = m.zip(b)
+
+// Function channel to calculate `y` for current input
+val y: ReadChannel[Int =&gt; Int] =
+  mAndB.map { case (m, b) =&gt;
+    (x: Int) =&gt; m * x + b
+  }
+
+// Render `y` for inputs [-5, 5]
+val values: ReadChannel[Seq[Int]] = y.map((-5 to 5).map(_))
+values.attach(println)
+
+// Simulate change of `m` in UI
+m := 10</code></pre><b>Output:</b><pre class="sourceCode"><code>Vector(-15, -10, -5, 0, 5, 10, 15, 20, 25, 30, 35)
+Vector(-40, -30, -20, -10, 0, 10, 20, 30, 40, 50, 60)</code></pre></p><p>In <span class="code">values</span> we listen to <span class="code">y</span> and whenever it receives a new function, it calls it for all the <span class="code">x</span> in the interval of the shown graph. The example shows that messages in streams are not bound to data objects and even immutable functions could be passed around.</p><p>The data propagation from the example is illustrated by the following diagram:</p><p><img src="images/data-flow.png"/></p><p>As soon as the user inserts a new value for <span class="code">m</span> or <span class="code">b</span>, <span class="code">mAndB</span> will produce a tuple. Then, <span class="code">y</span> computes the final function.</p><p>How channels work in detail is explained in the following sections. This example should only give an intuition of the fundamental concept as well as how data dependencies are expressed.</p><h2 id="streams">Streams</h2><p>The term &quot;stream&quot; was used several times in this chapter. This term is polysemous and requires further explanation. In reactive programming there are different types of streams with significant semantic differences.</p><h3 id="observables">Observables</h3><p><a href="https://rx.codeplex.com/">Rx</a> (Reactive Extensions) is a contract designed by Microsoft which calls streams <i>observables</i> and defines rules how to properly interact with them. An observable can be subscribed to with an <i>observer</i> which has one function for the next element and two auxiliary ones for handling errors and the completion of the stream.</p><p>Furthermore, observables are subdivided into <i>cold</i> and <i>hot</i> observables<a href="#fn2" class="footnote" id="fnref2">[2]</a>:</p><ul><li><b>Cold observable:</b> Streams that are passive and start publishing on request</li><li><b>Hot observable:</b> Streams that are active and publish regardless of subscriptions</li></ul><h3 id="backpressure">Back-pressure</h3><p>There are extensions to Rx which introduce back-pressure<a href="#fn3" class="footnote" id="fnref3">[3]</a> to deal with streams that are producing values too fast. This may not be confused with back-propagation which describes those streams where the subscribers could propagate values back to the producer.</p><h3 id="implementation">Implementation</h3><p>This illustrates the diversity of streams. Due to the nature of MetaRx, streams had to be implemented differently from the outlined ones. Some of the requirements were:</p><ul><li>lightweight design</li><li>support for n-way binding</li><li>usable as the basis for reactive data structures</li><li>provide functionality for resource management</li><li>require little boilerplate to define new operations</li></ul><p>To better differentiate from the established reactive frameworks, a less biased term than <i>observable</i> was called for and the reactive streams are therefore called <i>channels</i> in MetaRx. The requirements have been implemented as follows: A subscriber is just a function pointer (wrapped around a small object). A channel can have an unlimited number of children whereas each of the child channels knows their parent. A function for flushing the content of a channel upon subscription can be freely defined during instantiation<a href="#fn4" class="footnote" id="fnref4">[4]</a>. When a channel is destroyed, so are its children. Error handling is not part of the implementation. Similarly, no back-pressure is performed, but back-propagation is implemented for some selected operations like <span class="code">biMap()</span>.</p><p>For client-side web development only a small percentage of the interaction with streams require the features observables provide and this does not justify a more complex overall design. It is possible to use a full-fledged model like Rx, Monifu or Akka Streams for just those areas of the application where necessary by redirecting (piping) the channel output.</p><h2 id="summary">Summary</h2><p>To recap, a reactive data structure has four layers:</p><ul><li><b>State:</b> interpretation of the delta stream and &quot;converting&quot; it into a mutable object</li><li><b>Mutation operations:</b> functions to produce deltas on the stream<a href="#fn5" class="footnote" id="fnref5">[5]</a></li><li><b>Polling operations:</b> blocking functions to query the state</li><li><b>Streaming operations:</b> publish the state changes as a stream</li></ul><p>Obviously, the first three layers are the very foundation of object-orientation. It is different in that a) modifications are encoded as deltas and b) there are streaming operations.</p><h1 id="implementation-1">Implementation</h1><p>This section explains how reactive data structures are implemented in MetaRx. The design decisions will be beneficial for you to better understand the API and to design your own reactive data structures.</p><p>To leverage the capabilities of Scala’s type system, we decided to separate the logic into distinct traits. Each data structure defines six traits which, when combined using the Cake pattern, yield a mutable reactive object without any additional code needed:</p><p><img src="images/traits.png"/></p><p>For a hypothetical reactive data structure <span class="code">X</span> you would define:</p><pre class="sourceCode scala"><code data-lang="scala">object X {
+  /* Define delta change type */
+}
+
+/* Read/write access to state */
+trait StateX[T] extends Disposable {
+  /* This could be any kind of mutable storage */
+  val state: Storage[T] = ...
+  /* Channel needed by the other traits */
+  val changes: Channel[X.Delta[T]] = ...
+  /* Listen to `changes` and persist these in `state` */
+  changes.attach { ... }
+  /* Free resources */
+  def dispose() { changes.dispose() }
+}
+
+/* The name may suggest otherwise, but it does not have any access
+ * to the state; it only produces delta objects
+ */
+trait WriteX[T] {
+  val changes: WriteChannel[X.Delta[T]]
+  /* Also define operations to generate delta change objects */
+}
+
+trait DeltaX[T] {
+  val changes: ReadChannel[X.Delta[T]]
+  /* Also define streaming operations that listen to changes
+   * and process these
+   */
+}
+
+trait PollX[T] {
+  val changes: ReadChannel[X.Delta[T]]
+  /* Only read-only access is permitted here */
+  val state: Storage[T]
+  /* Also define streaming operations that need the state */
+}
+
+trait ReadX[T] extends DeltaX[T] with PollX[T]
+
+case class X[T]()
+  extends ReadX[T]
+  with WriteX[T]
+  with StateX[T]</code></pre><p><span class="code">X()</span> now yields a mutable reactive instance of our newly defined data structure.</p><h2 id="design-considerations">Design considerations</h2><p>It would have been possible to implement <span class="code">X</span> as a single class, but the chosen approach offers more flexibility. Each of the traits are exchangeable. There are more possibilities for object instantiations. For example, often a change stream is already available. In this case, <span class="code">DeltaX[T]</span> could be instantiated with a custom value for <span class="code">changes</span>. The caller can decide whether it needs any of the operations that <span class="code">PollX</span> defines. Depending on this decision it will either buffer the data or not. This ultimately leads to a more memory-efficient design as the responsibility of memory allocation is often shifted to the caller. It is in some way similar to what Python allows with its <span class="code">yield</span> expression.</p><p>The delta trait has a read-only version of the change stream. It may define operations that apply transformations directly on the stream without building any complex intermediate results. A prominent example would be the higher-order function <span class="code">map()</span>. As <span class="code">map()</span> works on a per-element basis and does not need any access to the state, it can be implemented efficiently. As a consequence, this allows for chaining: <span class="code">list.map(f).map(g).buffer</span> would compute the final list at the very end with the <span class="code">buffer</span> call<a href="#fn6" class="footnote" id="fnref6">[6]</a>.</p><p>Another motivating reason for this design is precisely the immutability of delta objects. The stream could be forwarded directly to the client which may render the elements in the browser on-the-fly. A similar use case would be persistence, for example in an asynchronous database.</p><p>Scala’s type refinements for traits come in useful. <span class="code">X</span> takes <span class="code">changes</span>
+from <span class="code">StateX</span>. It points to the same memory address in <span class="code">WriteX</span> and <span class="code">DeltaX</span> even though they are declared with different types. This is because <span class="code">Channel</span> inherits both from <span class="code">WriteChannel</span> and <span class="code">ReadChannel</span>.</p><p>The type-safety has an enormous benefit: A function can use a mutable stream internally, but returning the stream with writing capabilities would lead to unpredictable results. If the caller accidentally writes to this stream, this operation will succeed and in the worst case other subscribers receive the messages as well. As <span class="code">X</span> inherits from <span class="code">ReadX</span>, the function can be more explicit and revoke some of its capabilities simply by returning <span class="code">ReadX[T]</span>. Similarly, if the caller <i>should</i> get writing capabilities and no read capabilities, this can be made explicit as well. This will make it trivial to find bugs related to reading and writing capabilities of streams directly during compile-time. And it makes interfaces more intelligible as a more specific type reduces the semantic space of a function.</p><p>The third advantage is correctness: With the functionality separated into different traits, the proper behaviour can be ensured using property-based testing. Rules for the generation of delta objects could be defined<a href="#fn7" class="footnote" id="fnref7">[7]</a>. This stream is then used in <span class="code">StateX</span> and all other traits can be tested whether they behave as expected. Presently, a very basic approach for property-based testing is implemented, but future versions will explore better ways to achieve a higher coverage.</p><p>A variety of generally applicable reactive operations were specified as traits in <span class="code">pl.metastack.metarx.reactive</span>. They can be seen as a contract and a reactive data structure should strive to implement as many as possible of these. Depending on conceptual differences, not every operation can be defined on a data structure, though. As the signatures are given, this ensures that all data structures use the operations consistently. Each of the traits group functions that are similar in their behaviour. Furthermore, the traits are combined into sub-packages which follow the properties mentioned at the beginning of the chapter, namely <span class="code">pl.metastack.metarx.reactive.{mutate, poll, stream}</span>.</p><h2 id="summary-1">Summary</h2><p>To summarise, for a reactive data structure it is necessary to declare several traits with the following capabilities:</p><table><thead><tr class="header"><th> </th><th><b>State</b> </th><th><b>Mutation</b> </th><th><b>Polling</b> </th><th><b>Streaming</b> </th></tr></thead><tbody><tr class="even"><td><span class="code">Delta</span> </td><td>no </td><td>no </td><td>no </td><td>yes </td></tr><tr class="odd"><td><span class="code">Poll</span> </td><td>no </td><td>no </td><td>yes </td><td>yes<a href="#fn8" class="footnote" id="fnref8">[8]</a> </td></tr><tr class="even"><td><span class="code">Read</span> </td><td>no </td><td>no </td><td>yes </td><td>yes </td></tr><tr class="odd"><td><span class="code">Write</span> </td><td>no </td><td>yes </td><td>no </td><td>no </td></tr><tr class="even"><td><span class="code">State</span> </td><td>yes </td><td>no </td><td>no </td><td>no </td></tr></tbody><caption>Traits and layers of a reactive data structure</caption></table><p></p><h1 id="reactive-data-structures">Reactive data structures</h1><p>MetaRx currently implements four reactive data structures:</p><ul><li><b>Channels:</b> single values like <span class="code">T</span></li><li><b>Buffers:</b> lists like <span class="code">Seq[T]</span></li><li><b>Dictionaries:</b> maps like <span class="code">Map[A, B]</span></li><li><b>Sets:</b> reactive <span class="code">Set[T]</span></li></ul><h2 id="channels">Channels</h2><p>A channel models continuous values as a stream. It serves as a multiplexer for typed messages that consist of immutable values. Messages sent to the channel get propagated to the observers that have been attached to the channel — in the same order as they were added. It is possible to operate on channels with higher-order functions such as <span class="code">map()</span>, <span class="code">filter()</span> or <span class="code">take()</span>. These methods may be chained, such that every produced value is propagated down the observer chain.</p><p>MetaRx differentiates between two top-level channel types:</p><ul><li><b>Channel:</b> corresponds to a reactive <span class="code">T</span></li><li><b>Partial channel:</b> corresponds to a reactive <span class="code">Option[T]</span></li></ul><p>There are four channel implementations:</p><ul><li><span class="code">Channel</span>: stream that does not persist its values</li><li><span class="code">Var</span>: variable stream; its value is always defined and has an initial value<a href="#fn9" class="footnote" id="fnref9">[9]</a></li><li><span class="code">LazyVar</span>: stream for lazily evaluated variables</li><li><span class="code">PtrVar</span>: stream for generic events<a href="#fn10" class="footnote" id="fnref10">[10]</a></li></ul><p>Partial channels model optional values:</p><ul><li><span class="code">PartialChannel</span>: base type</li><li><span class="code">Opt</span>: stream that has two states, either <i>defined with a value</i> or <i>undefined</i></li></ul><blockquote><p><b>Note:</b> <span class="code">Opt[T]</span> is merely a convenience type and <span class="code">Var[Option[T]]</span> could be used, too.</p></blockquote><h3 id="operations">Operations</h3><p>Here is a simple example for a channel that receives integers. We register an observer which prints all values on the console:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Channel[Int]() // initialise
+ch.attach(println)      // attach observer
+ch := 42                // produce value</code></pre><b>Output:</b><pre class="sourceCode"><code>42</code></pre></p><blockquote><p><b>Note:</b> The <span class="code">:=</span> operator is a shortcut for the method <span class="code">produce</span>.</p></blockquote><p>The return values of operations are channels, therefore chaining is possible. Channels can be used to express data dependencies:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Channel[Int]()
+ch.filter(_ &gt; 3)
+  .map(_ + 1)
+  .attach(println)
+ch := 42
+ch := 1</code></pre><b>Output:</b><pre class="sourceCode"><code>43</code></pre></p><p>Use the method <span class="code">distinct</span> to produce a value if it is the first or different from the previous one. A use case is to perform time-consuming operations such as performing HTTP requests only once for the same user input:</p><pre class="sourceCode scala"><code data-lang="scala">ch.distinct.attach { query =&gt;
+  // perform HTTP request
+}</code></pre><p>Considering that you want to observe multiple channels of the same type and merge the produced values, you can use <span class="code">merge()</span>:</p><p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[String]()
+val b = Channel[String]()
+val c = Channel[String]()
+
+val merged: ReadChannel[String] = a.merge(b).merge(c)
+merged.attach(println)
+
+c := &quot;test&quot;</code></pre><b>Output:</b><pre class="sourceCode"><code>test</code></pre></p><p>A related function is <span class="code">or()</span>, which detects changes in any of the passed channels. The operator <span class="code">|</span> was defined for it:</p><p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[String]()
+val b = Channel[String]()
+val c = Channel[String]()
+
+val or: ReadChannel[Unit] = a | b | c
+or.attach(println)
+
+b := &quot;test&quot;</code></pre><b>Output:</b><pre class="sourceCode"><code>()</code></pre></p><p>For Boolean channels, the logical operators are defined, and yield a new channel with the result:</p><p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[Boolean]()
+val b = Channel[Boolean]()
+
+// a.zip(b).map { case (aVal, bVal) =&gt; aVal &amp;&amp; bVal }
+val aAndB: ReadChannel[Boolean] = a &amp;&amp; b
+
+// a.zip(b).map { case (aVal, bVal) =&gt; aVal || bVal }
+val aOrB: ReadChannel[Boolean] = a || b
+
+// a.isFalse()
+val notA = !a</code></pre></p><p>Furthermore, <span class="code">onTrue()</span> and <span class="code">onFalse()</span> are defined and will give a <span class="code">ReadChannel[Unit]</span> that triggers when either <span class="code">true</span> or <span class="code">false</span> was produced.</p><p>Aritmetic operators like <span class="code">+</span>, <span class="code">-</span>, <span class="code">*</span>, <span class="code">/</span>, <span class="code">%</span>, <span class="code">&lt;</span>, <span class="code">&lt;=</span>, <span class="code">&gt;</span>, <span class="code">&gt;=</span>, <span class="code">===</span> and <span class="code">!==</span> are also supported by those channels whose underlying types implement the Scala’s <span class="code">Numeric</span> or <span class="code">Ordering</span> trait:</p><p><pre class="sourceCode scala"><code data-lang="scala">val a = Channel[Int]()
+val b = Channel[Int]()
+
+val c: ReadChannel[Int] = 5 - 2 * a + 3 / b
+val d: ReadChannel[Boolean] = c &gt;= 42</code></pre></p><p>It must be noted that streaming operations have different semantics than their non-reactive counterparts. For brevity, only certain combinators are covered by the manual. For the rest, please refer to the ScalaDoc documentation.</p><h3 id="state-channels">State channels</h3><p>For better performance, <span class="code">Channel</span> does not cache the produced values. Some operations cannot be implemented without access to the current value though. Also, often it is necessary to poll the current value. For these reasons <i>state channels</i> such as <span class="code">Var</span> or <span class="code">Opt</span> were introduced. The following example visualises the different behaviours:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(42)
+ch.attach(println)
+
+val ch2 = Channel[Int]()
+ch2 := 42  // Value is lost as ch2 does not have any observers
+ch2.attach(println)</code></pre><b>Output:</b><pre class="sourceCode"><code>42</code></pre></p><p><span class="code">update()</span> is an operation that requires that the produced values are persisted. <span class="code">update()</span> takes a function which modifies the current value:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(2)
+ch.attach(println)
+ch.update(_ + 1)</code></pre><b>Output:</b><pre class="sourceCode"><code>2
+3</code></pre></p><p>A partially-defined channel (<span class="code">Opt</span>) is constructed as follows:</p><p><pre class="sourceCode scala"><code data-lang="scala">val x = Opt[Int]()
+x := 42</code></pre></p><p>Alternatively, a default value may be passed:</p><p><pre class="sourceCode scala"><code data-lang="scala">val x = Opt(42)</code></pre></p><p>A state channel provides all the methods a channel does. <span class="code">Var[T]</span> and <span class="code">Opt[T]</span> can be obtained from any existing <span class="code">ReadChannel[T]</span> using the method <span class="code">state</span>:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Channel[Int]()
+val chOpt: Opt[Int] = ch.state
+val chVar: Var[Int] = ch.state(42)</code></pre></p><p><span class="code">chOpt</span> is undefined as long as no value was produced on <span class="code">ch</span>. <span class="code">chVar</span> will be initialised with 42 and the value is overridden with the first produced value on <span class="code">ch</span>.</p><p>If writing capabilities are not required, <span class="code">cache</span> is to be preferred:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Channel[Int]()
+val chPart:  ReadPartialChannel[Int] = ch.cache
+val chState: ReadStateChannel[Int]   = ch.cache(42)</code></pre></p><p><span class="code">biMap()</span> allows to implement a bi-directional map, i.e. a stream with back-propagation:</p><p><pre class="sourceCode scala"><code data-lang="scala">val map   = Map(1 -&gt; &quot;one&quot;, 2 -&gt; &quot;two&quot;, 3 -&gt; &quot;three&quot;)
+val id    = Var(2)
+val idMap = id.biMap(
+  (id: Int)     =&gt; map(id),
+  (str: String) =&gt; map.find(_._2 == str).get._1)
+id   .attach(x =&gt; println(&quot;id   : &quot; + x))
+idMap.attach(x =&gt; println(&quot;idMap: &quot; + x))
+idMap := &quot;three&quot;</code></pre><b>Output:</b><pre class="sourceCode"><code>id   : 2
+idMap: two
+id   : 3
+idMap: three</code></pre></p><p><span class="code">biMap()</span> can be used to implement a lens as a channel. The following example defines a lens for the field <span class="code">b</span>. It has a back channel that composes a new object with the changed field value.</p><p><pre class="sourceCode scala"><code data-lang="scala">case class Test(a: Int, b: Int)
+val test = Var(Test(1, 2))
+val lens = test.biMap(_.b, (x: Int) =&gt; test.get.copy(b = x))
+test.attach(println)
+lens := 42</code></pre><b>Output:</b><pre class="sourceCode"><code>Test(1,2)
+Test(1,42)</code></pre></p><p>A <span class="code">LazyVar</span> evaluates its argument lazily. In the following example, it points to a mutable variable:</p><p><pre class="sourceCode scala"><code data-lang="scala">var counter = 0
+val ch = LazyVar(counter)
+ch.attach(value =&gt; { counter += 1; println(value) })
+ch.attach(value =&gt; { counter += 1; println(value) })</code></pre><b>Output:</b><pre class="sourceCode"><code>0
+1</code></pre></p><h3 id="call-semantics">Call semantics</h3><p>Functions passed to higher-order operations are evaluated on-demand:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(42).map(i =&gt; { println(i); i + 1 })
+ch.attach(_ =&gt; ())
+ch.attach(_ =&gt; ())</code></pre><b>Output:</b><pre class="sourceCode"><code>42
+42</code></pre></p><p>The value of a state channel gets propagated to a child when it requests the value (<span class="code">flush()</span>). In the example, <span class="code">Var</span> delays the propagation of the initial value 42 until the first <span class="code">attach()</span> call. <span class="code">attach()</span> goes up the channel chain and triggers the flush on each channel. In other words, <span class="code">map(f)</span> merely registers an observer, but does not call <span class="code">f</span> right away. <span class="code">f</span> is called each time when any of its direct or indirect children uses <span class="code">attach()</span>.</p><p>This reduces the memory usage and complexity of the channel implementation as no caching needs to be performed. On the other hand, you may want to perform on-site caching of the results of <span class="code">f</span>, especially if the function is side-effecting.</p><p>The current value of a state channel may be read at any time using <span class="code">.get</span> (if available) or <span class="code">flush()</span>.</p><p>There are operations that maintain state for all observers. For example, <span class="code">skip(n)</span> counts the number of produced values<a href="#fn11" class="footnote" id="fnref11">[11]</a>. As soon as <span class="code">n</span> is exceeded, all subsequent values are passed on. The initial <span class="code">attach()</span> calls ignore the first value (42), but deal with all values after that:</p><p><pre class="sourceCode scala"><code data-lang="scala">val ch = Var(42)
+val dch = ch.drop(1)
+dch.attach(println)
+dch.attach(println)
+ch := 23</code></pre><b>Output:</b><pre class="sourceCode"><code>23
+23</code></pre></p><p>If you do not want to receive the initial value, you may use <span class="code">silentAttach()</span> instead of <span class="code">attach()</span>. Another possibility would be to use <span class="code">tail.attach()</span>. However, this will only work for state channels with a single initial value. Buffers, dictionaries and sets on the other hand have several initial values.</p><h3 id="cycles">Cycles</h3><p>Certain propagation flows may lead to cycles:</p><p><pre class="sourceCode scala"><code data-lang="scala">val todo = Channel[String]()
+todo.attach { t =&gt;
+  println(t)
+  todo := &quot;&quot;
+}
+todo := &quot;42&quot;</code></pre></p><p>Setting <span class="code">todo</span> will result in an infinite loop. Such flows are detected and will lead to a run-time exception. Otherwise, the application would block indefinitely which makes debugging more difficult.</p><p>If a cycle as in the above example is expected, use the combinator <span class="code">filterCycles</span> to make it explicit. This will ignore value propagations caused by a cycle.</p><h3 id="subscription-channels">Subscription channels</h3><p><span class="code">Sub</span> is short for <i>subscription</i> and its purpose is to take values as well as channels.
+<pre class="sourceCode scala"><code data-lang="scala">val x = Var(42)
+
+val sub = Sub(23)
+sub.attach(println)
+
+sub := x  // `sub` will subscribe all values produced on `x`
+x := 200  // Gets propagated to `sub`
+
+sub := 10 // Cancel subscription and set value to 10
+x := 404  // Doesn't get propagated to `sub`</code></pre><b>Output:</b><pre class="sourceCode"><code>23
+42
+200
+10</code></pre></p><h3 id="binary-channels">Binary channels</h3><p>A binary channel (<span class="code">Bin</span>) can be used to communicate between two components. Values produced on <span class="code">Bin</span> will be propagated to <span class="code">left</span> and <span class="code">right</span>, but not between those two. It can be used for two-way binding.
+<pre class="sourceCode scala"><code data-lang="scala">val bin = Bin(0)
+
+def componentA(): Unit =
+  bin.left.attach { x =&gt;
+    println(s&quot;Component A received: $x&quot;)
+    if (x == 3) bin.right := 42
+  }
+
+def componentB(): Unit = {
+  bin.right.attach(x =&gt; println(s&quot;Component B received: $x&quot;))
+  (1 to 3).foreach(bin.left := _)
+}
+
+componentA()  // Sends 42 to component B if current value is 3
+componentB()  // Sends 1..3 to component A
+
+// `bin` is a state channel and stores the current value
+println(s&quot;Current value: ${bin.get}&quot;)
+
+bin := 23  // Broadcast to both components</code></pre><b>Output:</b><pre class="sourceCode"><code>Component A received: 0
+Component B received: 0
+Component A received: 1
+Component A received: 2
+Component A received: 3
+Component B received: 42
+Current value: 42
+Component A received: 23
+Component B received: 23</code></pre></p><h3 id="dependency-channels">Dependency channels</h3><p>Consider <span class="code">right = x + width</span>. Obviously the following holds: <span class="code">x = right - width</span>. A dependency channel (<span class="code">Dep</span>) allows you to express such dependencies in code:</p><pre class="sourceCode scala"><code data-lang="scala">val right: Dep[Double] = x.dep[Double](_ + width, _ - width)</code></pre><p>If you update <span class="code">right</span>, it will re-compute <span class="code">x</span>. This is not only limited to equations, but can be used for any invertible operation.</p><p>Note that <span class="code">Dep</span> is conceptually related to <span class="code">biMap</span>. The difference is that <span class="code">biMap</span> only deals with single values, whereas <span class="code">Dep</span> is an extension of <span class="code">Sub</span> which supports channel subscriptions.</p><h3 id="picklers">Picklers</h3><p>This feature relies on url for serialising. You will need to add the following dependency:</p><pre class="sourceCode scala"><code data-lang="scala">libraryDependencies += &quot;pl.metastack&quot; %%  &quot;metarx-upickle&quot; % &quot;0.1.5&quot;  // Scala
+libraryDependencies += &quot;pl.metastack&quot; %%% &quot;metarx-upickle&quot; % &quot;0.1.5&quot;  // Scala.js</code></pre><p>Use it as follows:
+<pre class="sourceCode scala"><code data-lang="scala">import pl.metastack.metarx.Upickle._
+import upickle.default._
+
+val buffer = Buffer(1, 2, 3)
+
+val json = write(buffer)
+println(json)
+
+val decoded = read[Buffer[Int]](json)
+println(decoded)</code></pre><b>Output:</b><pre class="sourceCode"><code>[1,2,3]
+ArrayBuffer(1, 2, 3)</code></pre></p><h2 id="buffers">Buffers</h2><p>Buffers are reactive lists. State changes such as row additions, updates or removals are encoded as delta objects. This allows to reflect these changes directly in the DOM, without having to re-render the entire list. <span class="code">Buffer[T]</span> is therefore more efficient than <span class="code">Channel[Seq[T]]</span> when dealing with list changes.</p><p>The following example creates a buffer with three initial rows, observes the size<a href="#fn12" class="footnote" id="fnref12">[12]</a> and then adds another row:</p><p><pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 3)
+buf.size.attach(println)
+buf += 4</code></pre><b>Output:</b><pre class="sourceCode"><code>3
+4</code></pre></p><p>All polling methods have a dollar sign as suffix <span class="code">$</span>:</p><p><pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 2, 3)
+println(buf.distinct$)</code></pre><b>Output:</b><pre class="sourceCode"><code>ArrayBuffer(1, 2, 3)</code></pre></p><p>An example of using <span class="code">removeAll()</span>:</p><p><pre class="sourceCode scala"><code data-lang="scala">val buf  = Buffer(3, 4, 5)
+val mod2 = buf.filter$(_ % 2 == 0)
+
+buf.removeAll(mod2.get)</code></pre></p><blockquote><p><b>Note:</b> <span class="code">Buffer</span> will identify rows by their value if the row type is a <span class="code">case class</span>. In this case, operations like <span class="code">insertAfter()</span> or <span class="code">remove()</span> will always refer to the first occurrence. This is often not desired. An alternative would be to define a <span class="code">class</span> instead or to wrap the values in a <span class="code">Ref[]</span> object.</p></blockquote><p><pre class="sourceCode scala"><code data-lang="scala">case class Todo(value: String)
+val todos = Buffer[Ref[Todo]]()
+todos.map { case tr @ Ref(t) =&gt;
+  // ...
+}</code></pre></p><blockquote><p>The value of a <span class="code">Ref[]</span> can be obtained by calling <span class="code">get</span>. However, it is more convenient to do pattern matching as in the example.</p></blockquote><p>You can observe the delta objects produced by a buffer:</p><p><pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 3)
+buf.changes.attach(println)
+buf += 4
+buf.clear()</code></pre><b>Output:</b><pre class="sourceCode"><code>Insert(Last(),1)
+Insert(Last(),2)
+Insert(Last(),3)
+Insert(Last(),4)
+Clear()</code></pre></p><p>All streaming operations that a buffer provides are implemented in terms of the <span class="code">changes</span> channel.</p><h2 id="dictionaries">Dictionaries</h2><p>Dictionaries are unordered maps from <span class="code">A</span> to <span class="code">B</span>. MetaRx abbreviates the type as <span class="code">Dict</span>.</p><h3 id="mapping-buffers">Mapping buffers</h3><p>If you want to map each element in a buffer to a value, you can use <span class="code">mapTo</span>:
+<pre class="sourceCode scala"><code data-lang="scala">val buf = Buffer(1, 2, 3)
+val map = buf.mapTo(_ * 2)
+
+buf += 4
+println(map.buffer.get)</code></pre><b>Output:</b><pre class="sourceCode"><code>Map(2 -&gt; 4, 4 -&gt; 8, 1 -&gt; 2, 3 -&gt; 6)</code></pre></p><h2 id="sets">Sets</h2><p>Reactive sets are implemented as <span class="code">BufSet</span><a href="#fn13" class="footnote" id="fnref13">[13]</a>.</p><h1 id="development">Development</h1><p><a href="https://travis-ci.org/MetaStack-pl/MetaRx"><img src="https://travis-ci.org/MetaStack-pl/MetaRx.svg"/></a></p><h2 id="tests">Tests</h2><p>The proper functioning of each operation is backed by <a href="https://github.com/MetaStack-pl/MetaRx/tree/master/shared/src/test/scala/pl/metastack/metarx">test cases</a>. These also provide complementary documentation.</p><h2 id="manual">Manual</h2><p>Run the following command to generate the manual:</p><pre class="sourceCode shell"><code>$ sbt manual/runMain pl.metastack.metarx.manual.Manual</code></pre><p>Deploy it with:</p><pre class="sourceCode shell"><code>$ sbt manual/runMain pl.metastack.metarx.manual.Deploy</code></pre><h1 id="support">Support</h1><h2 id="bugsfeature-requests">Bugs/feature requests</h2><p>Please use our <a href="https://github.com/MetaStack-pl/MetaRx/issues">issue tracker</a> to file bugs and feature requests.</p><h2 id="discussions">Discussions</h2><p>For discussions and general questions, please join our Gitter channel instead: <a href="https://gitter.im/MetaStack-pl/MetaRx?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge"><img src="https://badges.gitter.im/Join%20Chat.svg"/></a></p><div class="footnotes">
+            <hr/>
+            <ol><li id="fn1">
+              <p>
+                The types in the code are not needed for type inference and only serve illustration purposes.
+                <a href="#fnref1" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn2">
+              <p>
+                Source: <a href="http://leecampbell.blogspot.de/2010/08/rx-part-7-hot-and-cold-observables.html">leecampbell.blogspot.de</a> (4th February 2015)
+                <a href="#fnref2" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn3">
+              <p>
+                For instance, <a href="https://github.com/monifu/monifu">Monifu</a> implements this feature.
+                <a href="#fnref3" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn4">
+              <p>
+                This function is called by <span class="code">attach()</span> and produces multiple values which is necessary for some reactive data structures like lists.
+                <a href="#fnref4" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn5">
+              <p>
+                These functions do not access the state in any way.
+                <a href="#fnref5" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn6">
+              <p>
+                This is largely inspired by Scala's <a href="http://www.scala-lang.org/api/current/index.html#scala.collection.SeqView"><span class="code">SeqView</span></a>.
+                <a href="#fnref6" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn7">
+              <p>
+                For example, a <span class="code">Delta.Clear</span> may only be generated after <span class="code">Delta.Insert</span>.
+                <a href="#fnref7" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn8">
+              <p>
+                This is a practical decision. The <span class="code">Poll</span> trait has direct access to the state. Thus, certain streaming operations can be implemented more efficiently. This should be avoided though as a delta stream would need to be persisted first in order for the <span class="code">Poll</span> trait to be applicable.
+                <a href="#fnref8" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn9">
+              <p>
+                In Rx terms, <span class="code">Var</span> would correspond to a <i>cold observer</i> as attaching to it will flush its current value. This is different from <span class="code">Channel</span> which loses its messages when there are no subscribers.
+                <a href="#fnref9" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn10">
+              <p>
+                It can be used to create delta channels from DOM variables by binding to the corresponding events that triggered by the value changes. For an example see <span class="code">Node.click</span>.
+                <a href="#fnref10" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn11">
+              <p>
+                <span class="code">n</span> must be greater than 0.
+                <a href="#fnref11" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn12">
+              <p>
+                <span class="code">size</span> returns a <span class="code">ReadChannel[Int]</span>.
+                <a href="#fnref12" class="reversefootnote"> ↩</a>
+              </p>
+            </li><li id="fn13">
+              <p>
+                This name was chosen as <span class="code">Set</span> would have collided with Scala's implementation.
+                <a href="#fnref13" class="reversefootnote"> ↩</a>
+              </p>
+            </li></ol>
+          </div>
+      <p><small>Generated with <a href="http://github.com/MetaStack-pl/MetaDocs">MetaDocs v0.1.1</a></small></p>
+    </div>
+          <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script><script src="js/main.js"></script><script src="js/highlight.pack.js"></script>
+          <script>hljs.initHighlightingOnLoad();</script>
+        </body>
+      </html>
