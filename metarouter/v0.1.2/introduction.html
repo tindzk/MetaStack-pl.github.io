@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en-GB">
         <head>
-          <title>MetaRouter User Manual v0.1.2-SNAPSHOT - Introduction</title>
+          <title>MetaRouter User Manual v0.1.2 - Introduction</title>
           <meta charset="utf-8"/>
           <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
           <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -13,15 +13,17 @@
         <body>
           <div id="wrapper">
       <header>
-            <h1 class="title">MetaRouter User Manual v0.1.2-SNAPSHOT</h1>
-          </header><nav><a href="index.html">Table of contents</a> | <span>Next chapter: <a href="development.html">Development</a></span> | <span><a href="https://github.com/MetaStack-pl/MetaRouter/edit/master/manual/introduction.md">Edit source</a></span></nav><h1 id="introduction">Introduction</h1><p>MetaRouter is a routing library for Scala and Scala.js.</p><p>It allows to define type-safe routes that can be composed. Furthermore, routes can be mapped to <span class="code">case class</span>es.</p><h2 id="installation">Installation</h2><p>Add the following dependencies to your build configuration:</p><pre class="sourceCode scala"><code data-lang="scala">libraryDependencies += &quot;pl.metastack&quot; %%  &quot;metarouter&quot; % &quot;0.1.2-SNAPSHOT&quot;  // Scala
-libraryDependencies += &quot;pl.metastack&quot; %%% &quot;metarouter&quot; % &quot;0.1.2-SNAPSHOT&quot;  // Scala.js</code></pre><h2 id="example">Example</h2><p>Create a route:
+            <h1 class="title">MetaRouter User Manual v0.1.2</h1>
+          </header><nav><a href="index.html">Table of contents</a> | <span>Next chapter: <a href="development.html">Development</a></span> | <span><a href="https://github.com/MetaStack-pl/MetaRouter/edit/master/manual/introduction.md">Edit source</a></span></nav><h1 id="introduction">Introduction</h1><p>MetaRouter is a routing library for Scala and Scala.js.</p><p>It allows to define type-safe routes that can be composed. Furthermore, routes can be mapped to <span class="code">case class</span>es.</p><h2 id="installation">Installation</h2><p>Add the following dependencies to your build configuration:</p><pre class="sourceCode scala"><code data-lang="scala">libraryDependencies += &quot;pl.metastack&quot; %%  &quot;metarouter&quot; % &quot;0.1.2&quot;  // Scala
+libraryDependencies += &quot;pl.metastack&quot; %%% &quot;metarouter&quot; % &quot;0.1.2&quot;  // Scala.js</code></pre><h2 id="example">Example</h2><p>Create a route:
 <pre class="sourceCode scala"><code data-lang="scala">import shapeless._
 import pl.metastack.metarouter._
 
 val details = Root / &quot;details&quot; / Arg[Int]
-details</code></pre><b>Output:</b><pre class="sourceCode"><code>Route(details :: Arg(IntArg) :: HNil)</code></pre></p><p>Create a string URL by filling the placeholders of the route:
-<pre class="sourceCode scala"><code data-lang="scala">Router.url(details, 1 :: HNil)</code></pre><b>Output:</b><pre class="sourceCode"><code>/details/1</code></pre></p><p>Map a route to a <span class="code">case class</span> and parse an URL:
+details</code></pre><b>Output:</b><pre class="sourceCode"><code>Route(details :: Arg(IntArg) :: HNil)</code></pre></p><p>Fill the placeholders of the route:
+<pre class="sourceCode scala"><code data-lang="scala">val filled = Router.fill(details, 1 :: HNil)
+filled</code></pre><b>Output:</b><pre class="sourceCode"><code>RouteData(Route(details :: Arg(IntArg) :: HNil),1 :: HNil)</code></pre></p><p>Create a string URL from the filled route:
+<pre class="sourceCode scala"><code data-lang="scala">Router.url(filled)</code></pre><b>Output:</b><pre class="sourceCode"><code>/details/1</code></pre></p><p>Map a route to a <span class="code">case class</span> and parse an URL:
 <pre class="sourceCode scala"><code data-lang="scala">case class Details(userId: Int)
 val details = Router.route[Details](Root / &quot;details&quot; / Arg[Int])
 Router.parse(details, &quot;/details/42&quot;)</code></pre><b>Output:</b><pre class="sourceCode"><code>Some(Details(42))</code></pre></p><p>Create a routing table:
